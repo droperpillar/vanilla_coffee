@@ -1,60 +1,110 @@
 # EtherExists: Demystifying and Breaking Client Isolation in Wi-Fi Networks
+
 ## 1. Introduction
+
 This repo contains EtherExists, a set of tools to evaluate Wi-Fi networks for client isolation flaws within the Wi-Fi standards and concrete implementations. Our attacks can inject/write and intercept/read Wi-Fi frames over the wireless medium in a way that bypasses AP-enforced client isolation and Wi-Fi encryption, enabling unintended connectivity and/or MitM attacks between otherwise separated clients. These vulnerabilities affect worldwide Wi-Fi deployments with malicious outsiders/insiders, where our techniques can break client isolation to achieve Man-in-the-Middle for all WPA versions, i.e., from WEP up to WPA2/WPA3, and for all personal and even enterprise networks. Some attack variants allow breaking the isolation between guest networks and main networks.
 
-This codebase builds upon the public repository [macstealer](https://github.com/vanhoefm/macstealer/).
+The root cause of these flaws is that Wi-Fi client isolation, as deployed today, is not properly standard and therefore not consistently enforced. We hope out works encourages a more standardized and consistent approach to client isolation accross Wi-Fi vendors.
 
-## 2. Demystifying Wi-Fi Client Isolation and Encryption
+This codebase builds upon the public repository [macstealer](https://github.com/vanhoefm/macstealer/) and provides a simulated Wi-Fi environment to confirm Functionality of our main attack techniques.
 
-We give a brief summary of the attack techniques used in EtherExists to provide a high-level overview. 
 
-### Attacks Exploiting Shared Keys
+## 2. Overview of Main Attack Techniques
 
-Man-on-the-Side & Rogue AP (Home WPA2/WPA3-Personal) – Possession of a shared passphrase allows an insider to derive session keys or lure clients to a cloned AP, bypassing isolation trivially.
+We give a brief summary of the attack techniques that can be evaluated for Functionality using the simulated Wi-Fi environment we created:
 
-Abusing GTK – Wrapping unicast traffic inside broadcast/multicast frames encrypted with the Group Temporal Key lets an attacker inject packets directly to victims, bypassing AP forwarding rules. GTKs often remain valid long after client disconnection.
+1. **Gateway Bouncing**: Layer-2 isolation is nullified if the gateway forwards IP packets between clients. An attacker sends packets with the victim’s IP but the gateway’s MAC as the L2 destination; the gateway “bounces” them back to the victim, enabling client-to-client injection via Layer-3 routing.
 
-Passpoint Flaws – Even when per-client GTKs are intended, certain handshakes (group key, FT, FILS, WNM-Sleep) leak the real GTK. IGTKs are never randomized, enabling indirect GTK-based injection via WNM-Sleep frames.
+2. **Port Stealing** (across Virtual BSSIDs): By authenticating with the victim’s MAC address on a different BSSID, the attacker poisons the AP’s MAC-to-port mapping so that victim traffic is encrypted with the attacker’s PTK. This can also be used with spoofed gateway MACs to capture uplink traffic from all clients. In some cases, WPA-protected traffic is leaked in plaintext.
 
-### Routing-Layer Injection
+3. **Abusing GTK**: Wrapping unicast traffic inside broadcast/multicast frames encrypted with the Group Temporal Key lets an attacker inject packets directly to victims, bypassing AP forwarding rules. GTKs often remain valid long after client disconnection.
 
-Gateway Bouncing – Layer-2 isolation is nullified if the gateway forwards IP packets between clients. An attacker sends packets with the victim’s IP but the gateway’s MAC as the L2 destination; the gateway “bounces” them back to the victim, enabling client-to-client injection via Layer-3 routing.
 
-### Switching-Layer Interception & Injection
+# 3. Usage
 
-Port Stealing Across Virtual BSSIDs – By authenticating with the victim’s MAC address on a different BSSID, the attacker poisons the AP’s MAC-to-port mapping so that victim traffic is encrypted with the attacker’s PTK. This can also be used with spoofed gateway MACs to capture uplink traffic from all clients. In some cases, WPA-protected traffic is leaked in plaintext.
+Our scripts were tested on **Ubuntu 22.04.5 LTS**. To easily test the below scripts, we therefore strongly recommend to **download and install [Ubuntu 22.04](https://releases.ubuntu.com/jammy/) in a Virtual Machine** such as [VirtualBox](https://www.virtualbox.org/wiki/Downloads), and then executing the below commands.
 
-Broadcast Reflection – Crafting ToDS=1 frames with a broadcast address forces the AP to re-encrypt them with the victim’s GTK and deliver them. This allows unicast injection without knowing the GTK and works across BSSIDs/open networks.
+## 3.1. Initialization
 
-### Achieving Full Bidirectional MitM
+The following steps only need to be executed once to initialize the repository and to compile the necessary executables on your machine. First, install the necessary dependencies:
 
-By combining interception and injection primitives, we demonstrate full man-in-the-middle positioning in both single-AP and multi-AP enterprise environments:
+	sudo apt update
+	sudo apt install libnl-3-dev libnl-genl-3-dev libnl-route-3-dev \
+	libssl-dev libdbus-1-dev pkg-config build-essential net-tools python3-venv \
+	aircrack-ng rfkill git dnsmasq tcpreplay macchanger
 
-Maintaining Downlink & Uplink Control – Use port stealing for interception; reinject via GTK abuse, gateway bouncing, or client-triggered port restoration (eliciting victim replies to restore port mappings).
+Next, clone this repository, and run the following script in the root directory of the repository to compile our modified hostap release:
 
-Server-Triggered Port Restoration – Coordinate with an external server to restore gateway MAC mappings periodically, enabling sustained uplink relaying.
+	./setup.sh
+	cd macstealer/research
+	./build.sh
+	./pysetup.sh
 
-Inter-NIC Relaying – Relay intercepted traffic through a second NIC to forward it to the real gateway while keeping control of stolen ports.
+<a id="id-repeatable"></a>
+## 3.2. Repeatable Instructions
 
-Cross-AP MitM – Extend port stealing to distribution switches to intercept traffic from victims on entirely different APs.
+	cd macstealer/research
+	sudo su
+	source venv/bin/activate
 
-### Real-World Impact & Higher-Layer Exploits
 
-The attacks were validated on 5 home routers, 2 open-source firmware distributions, and live university WPA2-Enterprise networks. Beyond raw traffic access, these primitives enable:
+## 3.3. Gateway Bouncing
 
-RADIUS credential theft to set up rogue enterprise APs.
+First, **reboot** if you previously ran another experiment, to ensure the network configuration is reset back to normal. Next, follow the [repeatable instructions](#id-repeatable) in two terminals. Then in the first terminal, from the root directory of the repository, execute:
 
-DNS/DHCP poisoning, plaintext credential theft, and traffic analysis even against HTTPS.
+	cd setup
+	./setup-br0-gwbounce.sh
 
-## 3. Key Takeaway
-Wi-Fi client isolation, as deployed today, is neither cryptographically sound nor consistently enforced. The demonstrated attack techniques—spanning Wi-Fi encryption, routing, and switching layers—show that determined insiders can reliably obtain full MitM capabilities even in modern WPA2/3 networks with isolation enabled. The work calls for standardized definitions, multi-layer enforcement, per-client group keys, VLAN-based segregation, and stronger spoofing prevention to close these gaps. Full details are in the paper. 
+In the other terminal, now execute:
 
-# Usage
-As our tool is an extension of macstealer, you can follow macstealer's [README](https://github.com/vanhoefm/macstealer/blob/main/README.md) to install and use it. 
-In the extended [macstealer.py](https://github.com/zhouxinan/EtherExists/blob/main/macstealer/research/macstealer.py), we add several new options:
+	python3 macstealer.py wlan2 --c2c-ip wlan3 --other-bss --no-ssid-check --config client-simulated-AE-gatewaybouncing.conf
 
-`--check-gtk-shared`: Checking if second given interface receives the same GTK from BSSID.
+The attack is successful if the following output in red is shown:
 
-`--c2c-port-steal`: Second interface to test port stealing (downlink).
+	>>> Client to client traffic at IP layer is allowed (PSK{passphrase_atkr} to SAE{passphrase_victim})
 
-`--c2c-port-steal-uplink`: Second interface to test port stealing (uplink).
+
+## 3.4. Port Stealing
+
+First, **reboot** if you previously ran another experiment, to ensure the network configuration is reset back to normal. Next, follow the [repeatable instructions](#id-repeatable) in two terminals. Then in the first terminal, from the root directory of the repository, execute:
+
+	cd setup
+	./setup-br0-portsteal.sh
+
+In the other terminal, now execute:
+
+	python3 macstealer.py wlan2 --c2c-port-steal wlan3 --other-bss --no-ssid-check --config client-simulated-AE-portsteal.conf --server 192.168.100.1
+
+The attack is successful if the following output in red is shown:
+
+	>>> Downlink port stealing is successful.
+
+
+## 3.5. GTK Abuse
+
+First, **reboot** if you previously ran another experiment, to ensure the network configuration is reset back to normal. Next, follow the [repeatable instructions](#id-repeatable) in two terminals. Then in the first terminal, from the root directory of the repository, execute:
+
+	cd setup
+	./setup-br0-gtkabuse.sh
+
+In the other terminal, now execute the first attack variant:
+
+	python3 macstealer.py wlan2 --c2c-gtk-inject wlan3 --other-bss --no-ssid-check --config client-simulated-AE-gtkabuse.conf --no-id-check --c2m-mon-channel 6
+
+The attack is successful if the following output in red is shown:
+
+	>>> GTK wrapping ICMP ping is allowed (SAE{passphrase_victim} to SAE{passphrase_victim}).
+
+Next, press CTRL+C to terminate the macstealer.py script, and now execute the second attack variant:
+
+	python3 macstealer.py wlan2 --c2c-gtk-inject wlan3 --other-bss --no-ssid-check --config client-simulated-AE-gtkabuse2.conf --no-id-check --c2m-mon-channel 1
+
+The attack is successful if the following output in red is shown:
+
+	>>> GTK wrapping ICMP ping is allowed (PSK{passphrase_atkr} to PSK{passphrase_atkr}).
+
+
+# 4. Troubleshooting
+
+- When using Ubuntu 22.04 on VirtualBox 7 or higher, we noticed that the terminal may not properly start after installation. To fix this, follow [these steps](https://askubuntu.com/questions/1435918/terminal-not-opening-on-ubuntu-22-04-on-virtual-box-7-0-0). Alternatively, when installing Ubuntu 22.04, check/enable the option "Skip Unattended Installation".
+
